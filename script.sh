@@ -1,4 +1,5 @@
 #!/bin/bash
+
 # 定义31个省份城市参数
 declare -A cities
 cities["AnHui_mobile"]="%E5%AE%89%E5%BE%BD%E7%A7%BB%E5%8A%A8"
@@ -95,10 +96,14 @@ cities["ZheJiang_mobile"]="%E6%B5%99%E6%B1%9F%E7%A7%BB%E5%8A%A8"
 cities["ZheJiang_unicom"]="%E6%B5%99%E6%B1%9F%E8%81%94%E9%80%9A"
 cities["ZheJiang_telecom"]="%E6%B5%99%E6%B1%9F%E7%94%B5%E4%BF%A1"
 
+# 新增多个备选网址
+source_urls=(
+    "http://tv.gongzhonghao.com/search.php"
+    "http://tv.gongzhonghao.com/search2.php"
+    "https://iptv-org.github.io/iptv/countries/cn.m3u"
+    "https://raw.githubusercontent.com/iptv-org/iptv/master/countries/cn.m3u"
+)
 
-# 新的 URL
-URL="http://tv.gongzhonghao.com/search.php"
-# 这个网站不需要第二个URL来获取列表
 RESPONSE_FILE="response.txt"
 UNIQUE_SEARCH_RESULTS_FILE="unique_searchresults.txt"
 SPEED_TEST_LOG="speedtest.log"
@@ -114,47 +119,94 @@ CURL_LOG="curl.log"
 for CHANNEL_NAME in "${!cities[@]}"; do
     IFS=':' read -r NET_VALUE <<<"${cities[$CHANNEL_NAME]}"
     OUTPUT_FILE="./${CHANNEL_NAME}_NUM.txt"
+    FOUND_SOURCE=false
 
-    echo "==== 开始获取数据: ${CHANNEL_NAME} ======" | tee -a "$SUMMARY_FILE"
+    echo "==== 开始获取数据: ${CHANNEL_NAME} ====" | tee -a "$SUMMARY_FILE"
 
     # 清空响应文件
     : >${RESPONSE_FILE}
     : >${SPEED_TEST_LOG}
+    : >${UNIQUE_SEARCH_RESULTS_FILE}
 
-    # 使用新的 URL 发送 POST 请求，搜索特定省份和运营商的源
-    # 注意：新网站的搜索参数是 't' 和 'n'
-    curl -X POST "${URL}" \
-        -H "Accept-Language: en-CN,en;q=0.9,zh-CN;q=0.8,zh;q=0.7,en-GB;q=0.6,en-US;q=0.5" \
-        -d "t=${NET_VALUE}&n=" \
-        --connect-timeout 5 \
-        --max-time 15 \
-        -o "$RESPONSE_FILE"
+    # 遍历备选网址
+    for URL in "${source_urls[@]}"; do
+        echo "尝试从 ${URL} 获取数据..." | tee -a "$SUMMARY_FILE"
+        
+        # 根据URL类型调整请求和处理方式
+        if [[ "$URL" == *"gongzhonghao.com"* ]]; then
+            # 如果是搜索页，使用POST请求
+            curl -X POST "${URL}" \
+                -H "Accept-Language: en-CN,en;q=0.9,zh-CN;q=0.8,zh;q=0.7,en-GB;q=0.6,en-US;q=0.5" \
+                -d "t=${NET_VALUE}&n=" \
+                --connect-timeout 5 \
+                --max-time 15 \
+                -o "$RESPONSE_FILE"
+            
+            # 检查cURL是否成功
+            if [ $? -eq 0 ] && [ -s "$RESPONSE_FILE" ]; then
+                # 提取源地址
+                awk '
+                BEGIN { RS = "<tr>" ; FS = "</tr>" }
+                {
+                    if ($0 ~ /<td>/ && $0 !~ /失效/) {
+                        channel = $0;
+                        link = $0;
+                        gsub(/.*<td>([^<]*)<.*/, "\\1", channel);
+                        gsub(/.*<a href="([^"]*)".*/, "\\1", link);
+                        gsub(/ /, "", link);
+                        if (link ~ /http/) {
+                            print channel "," link;
+                        }
+                    }
+                }' "$RESPONSE_FILE" | grep -v '未知' >> "$UNIQUE_SEARCH_RESULTS_FILE"
+                if [ -s "$UNIQUE_SEARCH_RESULTS_FILE" ]; then
+                    FOUND_SOURCE=true
+                    echo "成功从 ${URL} 找到数据。" | tee -a "$SUMMARY_FILE"
+                    break # 找到数据后跳出内层循环
+                fi
+            fi
+
+        elif [[ "$URL" == *"github.io"* ]] || [[ "$URL" == *"raw.githubusercontent.com"* ]]; then
+            # 如果是m3u文件，直接下载并解析
+            curl "${URL}" \
+                --connect-timeout 10 \
+                --max-time 30 \
+                -o "$RESPONSE_FILE"
+            
+            if [ $? -eq 0 ] && [ -s "$RESPONSE_FILE" ]; then
+                # 解析m3u文件
+                grep -E '#EXTINF|http' "$RESPONSE_FILE" | while read -r line; do
+                    if [[ $line == '#EXTINF:-1,'* ]]; then
+                        channel_name=$(echo "$line" | sed 's/#EXTINF:-1,//g' | sed 's/,.*/,/g')
+                        channel_name="${channel_name//_mobile/,}"
+                        channel_name="${channel_name//_unicom/,}"
+                        channel_name="${channel_name//_telecom/,}"
+                        
+                        if [[ "$channel_name" == *"${CHANNEL_NAME}"* ]]; then
+                            read -r url
+                            echo "${channel_name}${url}" >> "$UNIQUE_SEARCH_RESULTS_FILE"
+                        fi
+                    fi
+                done
+                
+                if [ -s "$UNIQUE_SEARCH_RESULTS_FILE" ]; then
+                    FOUND_SOURCE=true
+                    echo "成功从 ${URL} 找到数据。" | tee -a "$SUMMARY_FILE"
+                    break # 找到数据后跳出内层循环
+                fi
+            fi
+        fi
+    done
     
-    ## 提取源地址，并进行整理
-    tmp_file=$(mktemp)
-    # 使用 awk 处理文件，提取所有链接
-    awk '
-    BEGIN { RS = "<tr>" ; FS = "</tr>" }
-    {
-        if ($0 ~ /<td>/ && $0 !~ /失效/) {
-            # 提取所有<td>...</td>中的文本和链接
-            channel = $0;
-            link = $0;
-            gsub(/.*<td>([^<]*)<.*/, "\\1", channel);
-            gsub(/.*<a href="([^"]*)".*/, "\\1", link);
-            gsub(/ /, "", link);
-            if (link ~ /http/) {
-                print channel "," link;
-            }
-        }
-    }' "$RESPONSE_FILE" | grep -v '未知' >"$UNIQUE_SEARCH_RESULTS_FILE"
-    
+    if [ "$FOUND_SOURCE" = false ]; then
+        echo "所有备选网址都未能找到有效的直播源，跳过 ${CHANNEL_NAME}" | tee -a "$SUMMARY_FILE"
+        continue
+    fi
+
     echo " unique search result : " | tee -a "$SUMMARY_FILE"
     cat "$UNIQUE_SEARCH_RESULTS_FILE" | tee -a "$SUMMARY_FILE"
 
-    # 剔除已知干扰地址，按需配置
-
-    ## 筛选有效，测试每个源的下载速度，选择最优源
+    # 筛选有效，测试每个源的下载速度，选择最优源
     echo "==== 有效地址提取完成, 开始测速 ======" | tee -a "$SUMMARY_FILE"
     line_count=$(wc -l <"$UNIQUE_SEARCH_RESULTS_FILE" | xargs)
     echo "line count is ${line_count}"
@@ -162,11 +214,8 @@ for CHANNEL_NAME in "${!cities[@]}"; do
     : >validurlist.txt
     echo "========= ${CHANNEL_NAME} ===测速日志==========" >>"$CURL_LOG"
 
-    # 直接使用 grep 和 awk 提取的链接，不需要第二步 curl
-    # 循环读取 UNIQUE_SEARCH_RESULTS_FILE 中的行，并提取 URL
     while IFS=',' read -r channel url; do
         i=$((i + 1))
-        # 检查 validurlist.txt 是否达到 10 行
         if [ "$(wc -l < validurlist.txt)" -ge 10 ]; then
             echo "validurlist.txt 已达到 10 行，跳出测速循环" | tee -a "$SUMMARY_FILE"
             break
@@ -176,7 +225,6 @@ for CHANNEL_NAME in "${!cities[@]}"; do
         echo "${url}" >> validurlist.txt
     done <"$UNIQUE_SEARCH_RESULTS_FILE"
 
-
     # 测试每个源的下载速度
     echo "==== 整理数据完成, 开始测速 ======" | tee -a "$SUMMARY_FILE"
     lines=$(wc -l <validurlist.txt)
@@ -184,7 +232,6 @@ for CHANNEL_NAME in "${!cities[@]}"; do
     echo "========= ${CHANNEL_NAME} ===测速日志==========" >>"$YT_DLP_LOG"
     while read -r url; do
         i=$((i + 1))
-        # 检查 SPEED_TEST_LOG 中有效行数，剔除“测速失败”的行，达到 5 行则跳出循环
         valid_speed_count=$(grep -v '失败' "$SPEED_TEST_LOG" | wc -l | xargs)
         if [ "$valid_speed_count" -ge 5 ]; then
             echo "SPEED_TEST_LOG 中有效测速行数已达到 5 行，跳出循环" | tee -a "$SUMMARY_FILE"
@@ -192,13 +239,9 @@ for CHANNEL_NAME in "${!cities[@]}"; do
         fi
         echo "[第 ${i}/${lines} 个]:  ${url}" | tee -a "$SUMMARY_FILE"
         output=$(timeout 40 yt-dlp --ignore-config --no-cache-dir --output "output.ts" --download-archive new-archive.txt --external-downloader ffmpeg --external-downloader-args "ffmpeg:-t 5" "${url}" 2>&1)
-
-        # 保存 yt-dlp 输出到日志
         echo "${output}" >>"$YT_DLP_LOG"
         :>yt.tmp
         echo "${output}" >yt.tmp
-
-        # 检查下载是否成功
         if ! grep -qE "^\s?\[download\]\s+[0-9]+%" yt.tmp; then
             echo "下载失败: ${url}" | tee -a "$SUMMARY_FILE"
             echo "下载失败: ${url}" >>"$SPEED_TEST_LOG"
@@ -206,45 +249,33 @@ for CHANNEL_NAME in "${!cities[@]}"; do
             continue
         fi
 
-        # 提取下载速度信息
         speed=$(grep -P "^\s?\[download\]\s+[0-9]+%" yt.tmp | grep -oP 'at\s\K[0-9]+.*$|in\s\K[0-9]+:[0-9]+$')
         speedinfo=$(grep -P "^\s?\[download\]\s+[0-9]+%" yt.tmp)
-
-        # 如果文件存在且大小合理，认为测速成功
         if [ -s output.ts ]; then
-                echo "${speedinfo}" | tee -a "$SUMMARY_FILE"
-                echo "${speed} ${url}" >>"$SPEED_TEST_LOG"
-            else
-                echo "测速失败!!" | tee -a "$SUMMARY_FILE"
-                echo "测速失败: ${url}" >>"$SPEED_TEST_LOG"
+            echo "${speedinfo}" | tee -a "$SUMMARY_FILE"
+            echo "${speed} ${url}" >>"$SPEED_TEST_LOG"
+        else
+            echo "测速失败!!" | tee -a "$SUMMARY_FILE"
+            echo "测速失败: ${url}" >>"$SPEED_TEST_LOG"
         fi
-        # 清理下载的文件
         rm -f new-archive.txt output.ts
     done < validurlist.txt
 
-    # 检查是否有有效的速度信息
     if [ ! -s "$SPEED_TEST_LOG" ] || ! grep -v '失败' "$SPEED_TEST_LOG" | grep -q '[0-9]'; then
         echo "没有找到有效的测速结果，跳过 ${CHANNEL_NAME}" | tee -a "$SUMMARY_FILE"
-        continue # 跳过当前循环，进入下一个频道的处理
+        continue
     fi
 
-    # 排序并选择速度最快的源地址
-    # 检查是否包含 MiB/s（yt-dlp执行的结果会有差异）
     if grep -E 'MiB/s|KiB/s' "$SPEED_TEST_LOG"; then
         echo "找到 MiB/s|KiB/s, 执行倒序排列" | tee -a "$SUMMARY_FILE"
-        # 将单位换算一致，使用bc比较方便
-        # sed -i 's/\([0-9.]*\)MiB\/s/echo "\1 * 1024" | bc KiB\/s/e' "$SPEED_TEST_LOG"
-        # 无法使用bc的使用awk将 MiB/s 转换为 KiB/s
-
         awk '{
         if ($1 ~ /MiB\/s/) {
-                # 提取数值部分并转换为 KiB/s
                 value = $1;
-                sub(/MiB\/s/, "", value);  # 去掉单位
-                value = value * 1024;  # 转换为 KiB
-                printf "%.2fKiB/s %s\n", value, $2;  # 格式化输出
+                sub(/MiB\/s/, "", value);
+                value = value * 1024;
+                printf "%.2fKiB/s %s\n", value, $2;
             } else {
-                print $0;  # 保留原样
+                print $0;
             }
             }' "$SPEED_TEST_LOG" >speed_temp.log && mv speed_temp.log "$SPEED_TEST_LOG"
 
@@ -256,21 +287,15 @@ for CHANNEL_NAME in "${!cities[@]}"; do
 
     besturl=$(head -n 1 validurl.txt | awk '{print $1}')
     echo "========== 最优源: ${besturl}" | tee -a "$SUMMARY_FILE"
-
-    # 由于新网站的搜索结果已经包含频道名和链接，因此不需要额外步骤来获取列表
-    echo "==== 提取频道名称和 m3u8 链接结果 ======" | tee -a "$SUMMARY_FILE"
     
-    # 将结果直接保存到输出文件
     cp "$UNIQUE_SEARCH_RESULTS_FILE" "$OUTPUT_FILE"
-
     sed -i "1i ${CHANNEL_NAME},#genre#" "$OUTPUT_FILE"
     line_count_output=$(($(wc -l < "$OUTPUT_FILE") - 1))
     NEW_output="${OUTPUT_FILE//NUM/$line_count_output}"
     mv "$OUTPUT_FILE" "$NEW_output"
     echo " $NEW_output 已经更新完成" | tee -a "$SUMMARY_FILE"
 
-    # 在汇总文件中加入分隔行
-    echo "==== ${CHANNEL_NAME} 处理完成 ======" | tee -a "$SUMMARY_FILE"
+    echo "==== ${CHANNEL_NAME} 处理完成 ====" | tee -a "$SUMMARY_FILE"
     echo "------------------------------" | tee -a "$SUMMARY_FILE"
     rm -f ${RESPONSE_FILE} ${UNIQUE_SEARCH_RESULTS_FILE} ${SPEED_TEST_LOG} ${SUMMARY_FILE} ${YT_DLP_LOG} curl.list curl.log validurl.txt validurlist.txt yt.tmp
 done
