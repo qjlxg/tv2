@@ -35,30 +35,34 @@ fi
 
 echo "下载完成，开始提取 IP/域名地址..."
 
-# 方法一：使用简单的正则表达式提取
-# 这适用于当IP/域名和端口号以独立一行或简单格式出现的情况
+# 尝试第一种提取方法：匹配 IP:PORT 或 DOMAIN:PORT 格式
 grep -oE '\b([a-zA-Z0-9\-\.]+\.[a-zA-Z]{2,}|[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+):[0-9]+\b' "$temp_html_file" > "$output_file"
 
-# 检查第一种方法是否有结果
-if [ -s "$output_file" ]; then
-    lines=$(wc -l < "$output_file")
-    echo "方法一成功提取 $lines 个结果，已保存到文件：$output_file"
-else
-    # 增加备用提取方法，用于应对更复杂的页面结构
+# 尝试第二种提取方法：如果第一种失败，尝试匹配 Fofa 网页中的特定HTML结构
+if [ ! -s "$output_file" ]; then
     echo "方法一未找到结果，使用备用方法提取..."
     # 备用方法：匹配 <a class="hsxa-host" ...>IP/DOMAIN</a>:<span ...>PORT</span> 的模式
-    # 并使用 sed 清理 HTML 标签
     grep -oE 'class="hsxa-host">([^<]+)</a>:\s*<span[^>]*>([^<]+)</span>' "$temp_html_file" | \
     sed -E 's/class="hsxa-host">([^<]+)<\/a>:\s*<span[^>]*>([^<]+)<\/span>/\1:\2/' > "$output_file"
-    
-    if [ -s "$output_file" ]; then
-        lines=$(wc -l < "$output_file")
-        echo "备用方法成功提取 $lines 个结果，已保存到文件：$output_file"
-    else
-        echo "未找到任何匹配的 IP/域名和端口号。可能原因："
-        echo "1. Fofa 页面结构已改变，需要更新脚本。"
-        echo "2. 搜索结果为空。"
-    fi
+fi
+
+# 尝试第三种提取方法：如果前两种都失败，尝试更通用的模式
+if [ ! -s "$output_file" ]; then
+    echo "备用方法也未找到结果，尝试更通用的匹配..."
+    # 尝试提取所有包含 IP 或域名，并后接端口号的模式
+    grep -oE '([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|[a-zA-Z0-9\-\.]+\.[a-zA-Z]{2,})(:|\s*:\s*)[0-9]+' "$temp_html_file" | \
+    sed -E 's/\s+//g' > "$output_file"
+fi
+
+
+# 检查所有方法后是否有结果
+if [ -s "$output_file" ]; then
+    lines=$(wc -l < "$output_file")
+    echo "成功提取 $lines 个结果，已保存到文件：$output_file"
+else
+    echo "未找到任何匹配的 IP/域名和端口号。可能原因："
+    echo "1. Fofa 页面结构已发生较大变化，需要更新脚本。"
+    echo "2. 搜索结果为空。"
 fi
 
 # 清理临时文件
