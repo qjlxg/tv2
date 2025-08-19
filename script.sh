@@ -35,21 +35,19 @@ fi
 
 echo "下载完成，开始提取 IP/域名地址..."
 
-# 新的提取逻辑：
-# 1. 首先，使用 grep 提取包含 'hsxa-host' 的行，这些行通常包含IP/域名。
-# 2. 然后，使用 sed 清理 HTML 标签，只保留 IP/域名。
-# 3. 最后，从原始 HTML 中提取端口号，并与 IP/域名进行匹配。
-# 这是一种更健壮的网页抓取方法，可以更好地适应网站结构变化。
+# 方法一：使用简单的正则表达式提取
+# 这适用于当IP/域名和端口号以独立一行或简单格式出现的情况
 grep -oE '\b([a-zA-Z0-9\-\.]+\.[a-zA-Z]{2,}|[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+):[0-9]+\b' "$temp_html_file" > "$output_file"
 
-# 检查是否有结果
+# 检查第一种方法是否有结果
 if [ -s "$output_file" ]; then
     lines=$(wc -l < "$output_file")
-    echo "成功提取 $lines 个结果，已保存到文件：$output_file"
+    echo "方法一成功提取 $lines 个结果，已保存到文件：$output_file"
 else
     # 增加备用提取方法，用于应对更复杂的页面结构
-    echo "使用备用方法提取..."
-    # 匹配 <a class="hsxa-host" ...>IP/DOMAIN</a>:<span ...>PORT</span> 的模式
+    echo "方法一未找到结果，使用备用方法提取..."
+    # 备用方法：匹配 <a class="hsxa-host" ...>IP/DOMAIN</a>:<span ...>PORT</span> 的模式
+    # 并使用 sed 清理 HTML 标签
     grep -oE 'class="hsxa-host">([^<]+)</a>:\s*<span[^>]*>([^<]+)</span>' "$temp_html_file" | \
     sed -E 's/class="hsxa-host">([^<]+)<\/a>:\s*<span[^>]*>([^<]+)<\/span>/\1:\2/' > "$output_file"
     
