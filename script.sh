@@ -8,9 +8,8 @@
 # 脚本已根据您的请求进行了简化，只包含搜索和提取功能。
 
 # 定义搜索的 Base64 编码字符串
-# (body="config.yaml" || body="clash_proxies.yaml" || body="all.yaml" || body="mihomo.yaml") && after="2025-08-18" && before="2025-08-19"
-# 此字符串由您提供
-qbase64="KGJvZHk9ImNvbmZpZy55YW1sIiB8fCBib2R5PSJjbGFzaF9wcm94aWVzLnlhbWwiIHx8IGJvZHk9ImFsbC55YW1sIiB8fCBib2R5PSJtaWhvbW8ueWFtbCIpICYmIGFmdGVyPSIyMDI1LTA4LTE4IiAmJiBiZWZvcmU9IjIwMjUtMDgtMTki"
+# 新的关键词: body="config.yaml" || body="clash_proxies.yaml" || body="all.yaml" || body="mihomo.yaml"
+qbase64="Ym9keT0iY29uZmlnLnlhbWwiIHx8IGJvZHk9ImNsYXNoX3Byb3hpZXMuamFtYyIgfHwgYm9keT0iYWxsLnlhbWwiIHx8IGJvZHk9Im1paG9tby55YW1sIg=="
 url_fofa="https://fofa.info/result?qbase64=$qbase64"
 
 # 使用当前日期和时间创建唯一的输出文件名
