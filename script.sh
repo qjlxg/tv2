@@ -35,27 +35,19 @@ fi
 
 echo "下载完成，开始提取 IP/域名地址..."
 
-# 尝试第一种提取方法：匹配 IP:PORT 或 DOMAIN:PORT 格式
-grep -oE '\b([a-zA-Z0-9\-\.]+\.[a-zA-Z]{2,}|[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+):[0-9]+\b' "$temp_html_file" > "$output_file"
+# 新的提取逻辑：
+# Fofa 页面结构发生了变化，IP 和端口号可能位于不同的 HTML 标签中。
+# 我们将分开提取，然后合并。
+# 提取所有可能的 IP 地址和域名
+grep -oE 'class="hsxa-host">([^<]+)</a>' "$temp_html_file" | sed 's/class="hsxa-host">//;s/<\/a>//' > extracted_hosts.txt
 
-# 尝试第二种提取方法：如果第一种失败，尝试匹配 Fofa 网页中的特定HTML结构
-if [ ! -s "$output_file" ]; then
-    echo "方法一未找到结果，使用备用方法提取..."
-    # 备用方法：匹配 <a class="hsxa-host" ...>IP/DOMAIN</a>:<span ...>PORT</span> 的模式
-    grep -oE 'class="hsxa-host">([^<]+)</a>:\s*<span[^>]*>([^<]+)</span>' "$temp_html_file" | \
-    sed -E 's/class="hsxa-host">([^<]+)<\/a>:\s*<span[^>]*>([^<]+)<\/span>/\1:\2/' > "$output_file"
-fi
+# 提取所有可能的端口号
+grep -oE 'class="hsxa-port">([^<]+)</span>' "$temp_html_file" | sed 's/class="hsxa-port">//;s/<\/span>//' > extracted_ports.txt
 
-# 尝试第三种提取方法：如果前两种都失败，尝试更通用的模式
-if [ ! -s "$output_file" ]; then
-    echo "备用方法也未找到结果，尝试更通用的匹配..."
-    # 尝试提取所有包含 IP 或域名，并后接端口号的模式
-    grep -oE '([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|[a-zA-Z0-9\-\.]+\.[a-zA-Z]{2,})(:|\s*:\s*)[0-9]+' "$temp_html_file" | \
-    sed -E 's/\s+//g' > "$output_file"
-fi
+# 使用 paste 将 IP/域名和端口号合并，并格式化为 "host:port"
+paste -d ':' extracted_hosts.txt extracted_ports.txt > "$output_file"
 
-
-# 检查所有方法后是否有结果
+# 检查是否有结果
 if [ -s "$output_file" ]; then
     lines=$(wc -l < "$output_file")
     echo "成功提取 $lines 个结果，已保存到文件：$output_file"
@@ -66,7 +58,7 @@ else
 fi
 
 # 清理临时文件
-rm -f "$temp_html_file"
+rm -f extracted_hosts.txt extracted_ports.txt "$temp_html_file"
 
 echo "=============================================="
 echo "=== 脚本执行完毕 ==="
