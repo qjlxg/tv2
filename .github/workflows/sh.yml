@@ -1,0 +1,38 @@
+name: Run IPTV Scraper
+
+on:
+  schedule:
+    # 每天 UTC 时间 02:00 运行
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    # 也可以手动触发
+
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      # 检出你的代码
+      uses: actions/checkout@v4
+
+    - name: Install dependencies
+      # 安装脚本所需的工具，包括 yt-dlp
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ffmpeg
+        sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
+        sudo chmod a+rx /usr/local/bin/yt-dlp
+
+    - name: Run script
+      # 运行你的脚本
+      run: |
+        chmod +x script.sh
+        ./script.sh
+
+    - name: Upload artifacts
+      # 将脚本生成的txt文件作为构建产物上传，方便下载
+      uses: actions/upload-artifact@v4
+      with:
+        name: iptv-lists
+        path: "*.txt"
